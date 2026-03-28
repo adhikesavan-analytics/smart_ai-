@@ -3,7 +3,7 @@
 Complete Streamlit Application with AI, Analytics & Business Intelligence
 Features: Secure Login, Auto Data Cleaning, Predictive Analytics, AI Chat, Anomaly Detection, Custom KPIs
 """
-
+ 
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -13,10 +13,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import warnings
 from datetime import datetime, timedelta
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import LabelEncoder
-from scipy import stats
 import io
 import hashlib
 import json
@@ -29,9 +25,9 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 from anthropic import Anthropic
 import os
-
+ 
 warnings.filterwarnings('ignore')
-
+ 
 # ============ PAGE CONFIG ============
 st.set_page_config(
     page_title="Smart Solar AI - Enterprise Platform",
@@ -39,7 +35,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
+ 
 # ============ CUSTOM CSS ============
 st.markdown("""
 <style>
@@ -83,7 +79,7 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
+ 
 # ============ DATABASE SETUP ============
 @st.cache_resource
 def get_db():
@@ -91,7 +87,7 @@ def get_db():
     conn = sqlite3.connect('smart_solar_ai.db', check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
-
+ 
 def init_database():
     """Initialize all database tables"""
     conn = get_db()
@@ -224,28 +220,28 @@ def init_database():
     
     conn.commit()
     conn.close()
-
+ 
 # Initialize database
 init_database()
-
+ 
 # ============ SESSION STATE ============
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
     st.session_state.user = None
-
+ 
 if 'uploaded_data' not in st.session_state:
     st.session_state.uploaded_data = None
-
+ 
 if 'data_cleaned' not in st.session_state:
     st.session_state.data_cleaned = False
-
+ 
 if 'chat_messages' not in st.session_state:
     st.session_state.chat_messages = []
-
+ 
 # ============ AUTHENTICATION ============
 def hash_pwd(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
-
+ 
 def verify_login(username, password):
     """Verify user login"""
     conn = get_db()
@@ -257,7 +253,7 @@ def verify_login(username, password):
     if user and user['password_hash'] == hash_pwd(password):
         return dict(user)
     return None
-
+ 
 def register_user(username, email, password, full_name, industry='solar'):
     """Register new user"""
     conn = get_db()
@@ -274,7 +270,7 @@ def register_user(username, email, password, full_name, industry='solar'):
     except sqlite3.IntegrityError:
         conn.close()
         return False, "❌ Username or email already exists!"
-
+ 
 def log_activity(user_id, action, details=""):
     """Log user activity"""
     conn = get_db()
@@ -285,7 +281,7 @@ def log_activity(user_id, action, details=""):
     ''', (user_id, action, details))
     conn.commit()
     conn.close()
-
+ 
 # ============ LOGIN PAGE ============
 def show_login():
     """Display login/signup page"""
@@ -343,11 +339,11 @@ def show_login():
                 st.code("""Admin:
 username: admin
 password: admin123
-
+ 
 Demo User:
 username: demo1
 password: password123
-
+ 
 Demo Manager:
 username: demo2
 password: password123
@@ -372,7 +368,7 @@ password: password123
                             st.error(msg)
                     else:
                         st.warning("⚠️ Please fill all fields")
-
+ 
 # ============ UTILITY FUNCTIONS ============
 def auto_clean_data(df):
     """Auto-clean and validate data"""
@@ -408,28 +404,33 @@ def auto_clean_data(df):
         'original_cols': original_cols,
         'final_cols': len(df.columns)
     }
-
+ 
 def detect_anomalies(df, column, threshold=0.95):
     """Detect anomalies using Isolation Forest"""
     try:
         if column not in df.columns:
             return None, None, None
         
-        X = df[[column]].dropna().values
-        if len(X) < 10:
+        data = df[[column]].dropna().values.flatten()
+        if len(data) < 10:
             return None, None, None
         
-        iso_forest = IsolationForest(contamination=0.1, random_state=42, n_estimators=100)
-        predictions = iso_forest.fit_predict(X)
+        # Simple anomaly detection using mean and standard deviation
+        mean = np.mean(data)
+        std = np.std(data)
+        threshold = 2.5  # 2.5 standard deviations
         
-        anomalies_df = df[iso_forest.fit_predict(df[[column]].fillna(df[column].mean()).values) == -1]
+        anomalies_mask = np.abs(data - mean) > (threshold * std)
+        predictions = np.where(anomalies_mask, -1, 1)
+        
+        anomalies_df = df[np.abs(df[column] - mean) > (threshold * std)]
         
         return anomalies_df, predictions, len(anomalies_df)
     except:
         return None, None, None
-
+ 
 def forecast_demand(df, date_col=None, value_col=None, periods=6):
-    """Forecast future demand using Linear Regression"""
+    """Forecast future demand using simple trend analysis"""
     try:
         if value_col is None or value_col not in df.columns:
             return None
@@ -438,25 +439,28 @@ def forecast_demand(df, date_col=None, value_col=None, periods=6):
         if len(df_sorted) < 3:
             return None
         
-        X = np.arange(len(df_sorted)).reshape(-1, 1)
         y = df_sorted[value_col].values
+        X = np.arange(len(y))
         
-        model = LinearRegression()
-        model.fit(X, y)
+        # Simple linear trend using numpy polyfit
+        z = np.polyfit(X, y, 1)
+        slope = z[0]
+        intercept = z[1]
         
-        future_X = np.arange(len(df_sorted), len(df_sorted) + periods).reshape(-1, 1)
-        predictions = model.predict(future_X)
+        # Generate forecast
+        future_X = np.arange(len(y), len(y) + periods)
+        predictions = slope * future_X + intercept
         
         forecast_df = pd.DataFrame({
             'Period': [f'Period {i+1}' for i in range(periods)],
             'Forecasted_Value': predictions,
-            'Trend': ['Increasing' if model.coef_[0] > 0 else 'Decreasing'] * periods
+            'Trend': ['Increasing' if slope > 0 else 'Decreasing'] * periods
         })
         
         return forecast_df
     except:
         return None
-
+ 
 def calculate_custom_kpi(df, col_name, calc_type):
     """Calculate KPI based on user selection"""
     if col_name not in df.columns:
@@ -477,7 +481,7 @@ def calculate_custom_kpi(df, col_name, calc_type):
             return df[col_name].std()
     except:
         return None
-
+ 
 def generate_ai_insights(df, industry):
     """Generate AI-driven insights"""
     insights = []
@@ -526,7 +530,8 @@ def generate_ai_insights(df, industry):
         
         # Outlier detection
         for col in numeric_cols[:2]:
-            z_scores = np.abs(stats.zscore(df[col].dropna()))
+            data = df[col].dropna()
+            z_scores = np.abs((data - data.mean()) / data.std())
             outliers = (z_scores > 3).sum()
             if outliers > 0:
                 insights.append(f"🔍 **Outliers Detected**: {outliers} extreme values in {col.title()}")
@@ -535,7 +540,7 @@ def generate_ai_insights(df, industry):
     
     except Exception as e:
         return [f"Unable to generate insights: {str(e)}"]
-
+ 
 def get_claude_response(prompt, df_context=""):
     """Get response from Claude AI"""
     try:
@@ -546,9 +551,9 @@ def get_claude_response(prompt, df_context=""):
         client = Anthropic(api_key=api_key)
         
         full_prompt = f"""{prompt}
-
+ 
 {f'Data Context: {df_context}' if df_context else ''}
-
+ 
 Provide clear, actionable insights in business language. Keep response concise and professional."""
         
         response = client.messages.create(
@@ -560,7 +565,7 @@ Provide clear, actionable insights in business language. Keep response concise a
         return response.content[0].text
     except Exception as e:
         return f"⚠️ Error: {str(e)}"
-
+ 
 def generate_pdf_report(df, title, industry, user_name):
     """Generate professional PDF report"""
     pdf_buffer = io.BytesIO()
@@ -648,7 +653,7 @@ def generate_pdf_report(df, title, industry, user_name):
     except Exception as e:
         st.error(f"Error generating PDF: {str(e)}")
         return None
-
+ 
 def generate_excel_report(df, title="Report"):
     """Generate Excel report"""
     try:
@@ -684,14 +689,14 @@ def generate_excel_report(df, title="Report"):
     except Exception as e:
         st.error(f"Error generating Excel: {str(e)}")
         return None
-
+ 
 # ============ MAIN APP ============
 def main():
     if not st.session_state.authenticated:
         show_login()
     else:
         show_main_app()
-
+ 
 def show_main_app():
     """Main application interface"""
     
@@ -763,7 +768,7 @@ def show_main_app():
         page_admin_users()
     elif st.session_state.page == 'activity_logs':
         page_activity_logs()
-
+ 
 # ============ PAGE: DASHBOARD ============
 def page_dashboard():
     st.title("📊 Dashboard")
@@ -825,7 +830,7 @@ def page_dashboard():
             st.metric("Columns", len(st.session_state.uploaded_data.columns))
     else:
         st.info("📤 Upload data from 'Upload Data' page to get started!")
-
+ 
 # ============ PAGE: UPLOAD DATA ============
 def page_upload():
     st.title("📤 Smart Data Upload & Auto-Cleaning")
@@ -906,7 +911,7 @@ def page_upload():
         
         **Result:** Clean, analysis-ready data in seconds!
         """)
-
+ 
 # ============ PAGE: CUSTOM KPI BUILDER ============
 def page_kpi_builder():
     st.title("⚙️ Custom KPI Builder")
@@ -976,7 +981,7 @@ def page_kpi_builder():
                     st.metric(kpi['kpi_name'], f"{kpi_value:.2f}", f"Target: {kpi['threshold_value']:.2f}")
         else:
             st.info("No KPIs created yet")
-
+ 
 # ============ PAGE: PREDICTIVE ANALYTICS ============
 def page_predictive_analytics():
     st.title("📈 Predictive Analytics & Forecasting")
@@ -1044,7 +1049,7 @@ def page_predictive_analytics():
         - Production scheduling
         - Revenue projection
         """)
-
+ 
 # ============ PAGE: ANOMALY DETECTION ============
 def page_anomaly_detection():
     st.title("🔍 Anomaly Detection")
@@ -1110,7 +1115,7 @@ def page_anomaly_detection():
         - Solar: Efficiency drops
         - Sales: Unusual transactions
         """)
-
+ 
 # ============ PAGE: AI CHAT ASSISTANT ============
 def page_ai_chat():
     st.title("💬 AI Chat Assistant")
@@ -1149,7 +1154,7 @@ def page_ai_chat():
         ''', (st.session_state.user['user_id'], prompt, response))
         conn.commit()
         conn.close()
-
+ 
 # ============ PAGE: SMART REPORTS ============
 def page_smart_reports():
     st.title("📊 Smart Report Generator")
@@ -1202,7 +1207,7 @@ def page_smart_reports():
             insights = generate_ai_insights(df, st.session_state.user['industry'])
             for insight in insights:
                 st.markdown(insight)
-
+ 
 # ============ PAGE: ORIGINAL ANALYTICS ============
 def page_original_analytics():
     st.title("📊 Original Analytics Modules")
@@ -1240,7 +1245,7 @@ def page_original_analytics():
     with tab4:
         st.subheader("Business Health Score")
         st.info("Calculate comprehensive business health metrics")
-
+ 
 # ============ PAGE: ADMIN USERS ============
 def page_admin_users():
     st.title("👥 Manage Users")
@@ -1276,7 +1281,7 @@ def page_admin_users():
                 st.success(msg)
             else:
                 st.error(msg)
-
+ 
 # ============ PAGE: ACTIVITY LOGS ============
 def page_activity_logs():
     st.title("📋 Activity Logs")
@@ -1299,7 +1304,8 @@ def page_activity_logs():
     
     logs_df = pd.DataFrame(logs)
     st.dataframe(logs_df, use_container_width=True)
-
+ 
 # ============ RUN APP ============
 if __name__ == "__main__":
     main()
+ 
